@@ -1,7 +1,12 @@
 package org.lambadaframework.aws;
 
+import com.amazonaws.AmazonClientException;
+import com.amazonaws.AmazonWebServiceRequest;
+import com.amazonaws.ClientConfiguration;
 import com.amazonaws.regions.Region;
 import com.amazonaws.regions.Regions;
+import com.amazonaws.retry.PredefinedRetryPolicies;
+import com.amazonaws.retry.RetryPolicy;
 import com.amazonaws.services.apigateway.AmazonApiGateway;
 import com.amazonaws.services.apigateway.AmazonApiGatewayClient;
 import com.amazonaws.services.apigateway.model.*;
@@ -84,9 +89,30 @@ public class ApiGateway extends AWSTools {
         if (apiGatewayClient != null) {
             return apiGatewayClient;
         }
+        
+        // Allow retries if we make too many requests in quick succession to API gateway
+        RetryPolicy.RetryCondition retryCondition = new RetryPolicy.RetryCondition() {
 
-        return apiGatewayClient = new AmazonApiGatewayClient(getAWSCredentialsProvideChain()).withRegion(Region.getRegion(Regions.fromName(deployment.getRegion())));
+            @Override
+            public boolean shouldRetry(AmazonWebServiceRequest awsr, AmazonClientException ace, int i) {
+                if (ace instanceof TooManyRequestsException) {
+                    return true;
+                }
+                return PredefinedRetryPolicies.DEFAULT_RETRY_CONDITION.shouldRetry(awsr, ace, i);
+            }
+        };
+        
+        // Allow up to 10 retries
+        RetryPolicy retryPolicy = new RetryPolicy(retryCondition, 
+                                                  PredefinedRetryPolicies.DEFAULT_BACKOFF_STRATEGY, 
+                                                  10, true);
+        
+        ClientConfiguration clientConfig = new ClientConfiguration()
+                                                .withRetryPolicy(retryPolicy);
+
+        return apiGatewayClient = new AmazonApiGatewayClient(getAWSCredentialsProvideChain(), clientConfig).withRegion(Region.getRegion(Regions.fromName(deployment.getRegion())));
     }
+    
 
     /**
      * This method scans the compiled JAR package for JAX-RS Annotations and create
