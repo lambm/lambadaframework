@@ -5,6 +5,8 @@ import com.amazonaws.services.lambda.runtime.CognitoIdentity;
 import com.amazonaws.services.lambda.runtime.Context;
 import com.amazonaws.services.lambda.runtime.LambdaLogger;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.ArrayList;
+import java.util.List;
 import org.glassfish.jersey.server.model.Invocable;
 import org.glassfish.jersey.server.model.MethodHandler;
 import org.glassfish.jersey.server.model.ResourceMethod;
@@ -33,6 +35,10 @@ public class HandlerTest {
         public long id;
         public String query1;
     }
+    
+    public static enum EntityType {
+        big, small
+    }
 
     @Path("/")
     public static class DummyController {
@@ -44,6 +50,20 @@ public class HandlerTest {
             Entity entity = new Entity();
             entity.id = id;
             entity.query1 = "cagatay gurturk";
+            return javax.ws.rs.core.Response
+                    .status(200)
+                    .entity(entity)
+                    .build();
+        }
+        
+        @GET
+        @Path("/type/{type}")
+        public javax.ws.rs.core.Response getEntityByType(
+                @PathParam("type") EntityType e
+        ) {
+            Entity entity = new Entity();
+            entity.id = 33;
+            entity.query1 = e.name();
             return javax.ws.rs.core.Response
                     .status(200)
                     .entity(entity)
@@ -64,6 +84,30 @@ public class HandlerTest {
                     .status(201)
                     .header("Location", "http://www.google.com")
                     .entity(entity)
+                    .build();
+        }
+        
+        @POST
+        @Path("/")
+        public javax.ws.rs.core.Response createEntity(
+                Entity entity
+        ) {
+            return javax.ws.rs.core.Response
+                    .status(201)
+                    .header("Location", "http://www.google.com")
+                    .entity(entity)
+                    .build();
+        }
+        
+        @POST
+        @Path("/batch")
+        public javax.ws.rs.core.Response createEntities(
+                List<Entity> entities
+        ) {
+            return javax.ws.rs.core.Response
+                    .status(201)
+                    .header("Location", "http://www.google.com")
+                    .entity(entities)
                     .build();
         }
     }
@@ -214,6 +258,119 @@ public class HandlerTest {
 
         assertEquals("201", response.getErrorMessage());
         assertEquals("test3", ((Entity) response.getEntity()).query1);
+        assertEquals(123, ((Entity) response.getEntity()).id);
+        assertEquals("http://www.google.com", response.getHeaders().get("Location"));
+
+    }
+    
+    /**
+     * Tests sending an Entity object in the request
+    */
+    @Test
+    public void testWithPostObject()
+            throws Exception {
+
+        Request exampleRequest = getRequest("{\n" +
+                "  \"package\": \"org.lambadaframework\",\n" +
+                "  \"pathTemplate\": \"/{id}\",\n" +
+                "  \"method\": \"POST\",\n" +
+                "  \"requestBody\": { \"id\" : \"456\", \"query1\": \"test4\"},\n" +
+                "  \"path\": {},\n" +
+                "  \"querystring\": {},\n" +
+                "  \"header\": {}\n" +
+                "}");
+
+
+        Handler handler = new Handler();
+        handler.setRouter(getMockRouter("createEntity", Entity.class));
+        Response response = handler.handleRequest(exampleRequest, getContext());
+
+        assertEquals("201", response.getErrorMessage());
+        assertEquals("test4", ((Entity) response.getEntity()).query1);
+        assertEquals(456, ((Entity) response.getEntity()).id);
+        assertEquals("http://www.google.com", response.getHeaders().get("Location"));
+    }
+    
+    /**
+     * Tests sending a List<Entity> in the request
+    */
+    @Test
+    public void testWithPostList()
+            throws Exception {
+
+        Request exampleRequest = getRequest("{\n" +
+                "  \"package\": \"org.lambadaframework\",\n" +
+                "  \"pathTemplate\": \"/batch}\",\n" +
+                "  \"method\": \"POST\",\n" +
+                "  \"requestBody\": [ { \"id\" : \"789\", \"query1\": \"test5\"}, { \"id\" : \"333\", \"query1\": \"test6\"} ],\n" +
+                "  \"path\": {},\n" +
+                "  \"querystring\": {},\n" +
+                "  \"header\": {}\n" +
+                "}");
+
+
+        Handler handler = new Handler();
+        handler.setRouter(getMockRouter("createEntities", List.class));
+        Response response = handler.handleRequest(exampleRequest, getContext());
+
+        assertEquals("201", response.getErrorMessage());
+        assertEquals(2, ((List) response.getEntity()).size());
+        Entity second = (Entity)((List) response.getEntity()).get(1);
+        assertEquals(333, second.id);
+        assertEquals("test6", second.query1);
+        assertEquals("http://www.google.com", response.getHeaders().get("Location"));
+    }
+    
+    
+    @Test
+    public void testWithEnum()
+            throws Exception {
+
+        Request exampleRequest = getRequest("{\n" +
+                "  \"package\": \"org.lambadaframework\",\n" +
+                "  \"pathTemplate\": \"/type/{type}\",\n" +
+                "  \"method\": \"GET\",\n" +
+                "  \"requestBody\": {},\n" +
+                "  \"path\": {\n" +
+                "    \"type\": \"big\"\n" +
+                "  },\n" +
+                "  \"querystring\": {},\n" +
+                "  \"header\": {}\n" +
+                "}");
+
+        Handler handler = new Handler();
+        handler.setRouter(getMockRouter("getEntityByType", EntityType.class));
+        Response response = handler.handleRequest(exampleRequest, getContext());
+
+        assertEquals("200", response.getErrorMessage());
+        assertEquals("big", ((Entity) response.getEntity()).query1);
+        assertEquals(33, ((Entity) response.getEntity()).id);
+
+    }
+    
+    @Test
+    public void testWithNull()
+            throws Exception {
+        org.apache.log4j.BasicConfigurator.configure();
+        Request exampleRequest = getRequest("{\n" +
+                "  \"package\": \"org.lambadaframework\",\n" +
+                "  \"pathTemplate\": \"/{id}\",\n" +
+                "  \"method\": \"POST\",\n" +
+                "  \"requestBody\": {},\n" +
+                "  \"path\": {\n" +
+                "    \"id\": \"123\"\n" +
+                "  },\n" +
+                "  \"querystring\": {},\n" +
+                "  \"header\": {}\n" +
+                "}");
+
+
+        Handler handler = new Handler();
+        handler.setRouter(getMockRouter("createEntity", long.class, String.class));
+        Response response = handler.handleRequest(exampleRequest, getContext());
+
+        assertEquals("201", response.getErrorMessage());
+        assertNull(((Entity) response.getEntity()).query1);
         assertEquals(123, ((Entity) response.getEntity()).id);
         assertEquals("http://www.google.com", response.getHeaders().get("Location"));
 

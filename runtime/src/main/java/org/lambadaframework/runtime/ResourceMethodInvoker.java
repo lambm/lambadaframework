@@ -2,6 +2,8 @@ package org.lambadaframework.runtime;
 
 
 import com.amazonaws.services.lambda.runtime.Context;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.lang.reflect.Constructor;
 
 import org.apache.log4j.Logger;
 import org.glassfish.jersey.server.model.Invocable;
@@ -17,6 +19,7 @@ import javax.ws.rs.core.MediaType;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
+import java.lang.reflect.Type;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -24,18 +27,41 @@ public class ResourceMethodInvoker {
 
 
     static final Logger logger = Logger.getLogger(ResourceMethodInvoker.class);
+    static final ObjectMapper objectMapper = new ObjectMapper();
 
     private ResourceMethodInvoker() {
     }
 
     private static Object toObject(String value, Class clazz) {
-        if (Integer.class == clazz || Integer.TYPE == clazz) return Integer.parseInt(value);
-        if (Long.class == clazz || Long.TYPE == clazz) return Long.parseLong(value);
-        if (Float.class == clazz || Float.TYPE == clazz) return Float.parseFloat(value);
-        if (Boolean.class == clazz || Boolean.TYPE == clazz) return Boolean.parseBoolean(value);
-        if (Double.class == clazz || Double.TYPE == clazz) return Double.parseDouble(value);
-        if (Byte.class == clazz || Byte.TYPE == clazz) return Byte.parseByte(value);
-        if (Short.class == clazz || Short.TYPE == clazz) return Short.parseShort(value);
+        if (Integer.class == clazz || Integer.TYPE == clazz) return value == null ? null : Integer.parseInt(value);
+        if (Long.class == clazz || Long.TYPE == clazz) return value == null ? null : Long.parseLong(value);
+        if (Float.class == clazz || Float.TYPE == clazz) return value == null ? null : Float.parseFloat(value);
+        if (Boolean.class == clazz || Boolean.TYPE == clazz) return value == null ? null : Boolean.parseBoolean(value);
+        if (Double.class == clazz || Double.TYPE == clazz) return value == null ? null : Double.parseDouble(value);
+        if (Byte.class == clazz || Byte.TYPE == clazz) return value == null ? null : Byte.parseByte(value);
+        if (Short.class == clazz || Short.TYPE == clazz) return value == null ? null : Short.parseShort(value);
+        // See if the class has a string constructor
+        try {
+            Constructor constructor = clazz.getConstructor(String.class);
+            return constructor.newInstance(value);
+        } catch (InvocationTargetException |InstantiationException | IllegalAccessException | IllegalArgumentException | NoSuchMethodException nsme) {
+            // Not a class with a string constructor
+        }
+        // See if the class has a static 'valueOf' method
+        try {
+            Method method = clazz.getDeclaredMethod("valueOf", String.class);
+            return method.invoke(null, value);
+        } catch (InvocationTargetException | IllegalAccessException | NoSuchMethodException nsme) {
+            // Not a class with a static valueOf method
+        }
+        // See if the class has a static 'fromStrign' method
+        try {
+            Method method = clazz.getDeclaredMethod("fromString", String.class);
+            return method.invoke(null, value);
+        } catch (InvocationTargetException | IllegalAccessException | NoSuchMethodException nsme) {
+            // Not a class with a static fromString method
+        }
+        
         return value;
     }
 
@@ -85,7 +111,7 @@ public class ResourceMethodInvoker {
             /**
              * Query parameter
              */
-            if (parameter.isAnnotationPresent(QueryParam.class)) {
+            else if (parameter.isAnnotationPresent(QueryParam.class)) {
                 QueryParam annotation = parameter.getAnnotation(QueryParam.class);
                 varargs.add(toObject(
                         (String) request.getQueryParams().get(annotation.value()), parameterClass
@@ -94,17 +120,19 @@ public class ResourceMethodInvoker {
             }
 
             /**
-             * Query parameter
+             * Header parameter
              */
-            if (parameter.isAnnotationPresent(HeaderParam.class)) {
+            else if (parameter.isAnnotationPresent(HeaderParam.class)) {
                 HeaderParam annotation = parameter.getAnnotation(HeaderParam.class);
                 varargs.add(toObject(
                         (String) request.getRequestHeaders().get(annotation.value()), parameterClass
                         )
                 );
             }
+            
+            
 
-            if (consumesAnnotation != null && consumesSpecificType(consumesAnnotation, MediaType.APPLICATION_JSON)
+            else if (consumesAnnotation != null && consumesSpecificType(consumesAnnotation, MediaType.APPLICATION_JSON)
                     && parameter.getType() == String.class) {
                 //Pass raw request body
                 varargs.add(request.getRequestBody());
@@ -114,8 +142,18 @@ public class ResourceMethodInvoker {
             /**
              * Lambda Context can be automatically injected
              */
-            if (parameter.getType() == Context.class) {
+            else if (parameter.getType() == Context.class) {
                 varargs.add(lambdaContext);
+            }
+            
+            
+            /**
+             * If none of the other types, assume a JSON object
+             */
+            else {
+                Object requestBody = request.getRequestBody();
+                Type parameterType = parameter.getParameterizedType();
+                varargs.add(objectMapper.convertValue(requestBody, objectMapper.getTypeFactory().constructType(parameterType))); 
             }
         }
 
