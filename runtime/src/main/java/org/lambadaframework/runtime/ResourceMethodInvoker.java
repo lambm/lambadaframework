@@ -2,7 +2,9 @@ package org.lambadaframework.runtime;
 
 
 import com.amazonaws.services.lambda.runtime.Context;
+import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import java.io.IOException;
 import java.lang.reflect.Constructor;
 
 import org.apache.log4j.Logger;
@@ -151,9 +153,18 @@ public class ResourceMethodInvoker {
              * If none of the other types, assume a JSON object
              */
             else {
-                Object requestBody = request.getRequestBody();
-                Type parameterType = parameter.getParameterizedType();
-                varargs.add(objectMapper.convertValue(requestBody, objectMapper.getTypeFactory().constructType(parameterType))); 
+                try {
+                    Object requestBody = request.getRequestBody();
+                    Type parameterType = parameter.getParameterizedType();
+                    JavaType javaType = objectMapper.getTypeFactory().constructType(parameterType); 
+                    if (requestBody instanceof String) {
+                        varargs.add(objectMapper.readValue((String)requestBody, javaType));
+                    } else {
+                        varargs.add(objectMapper.convertValue(requestBody, javaType));
+                    }
+                } catch (IOException ex) {
+                    // Our assumption of a JSON object was incorrect
+                }
             }
         }
 
